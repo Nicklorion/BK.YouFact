@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "YouFact",
+  "version": "0.1.0",
+  "description": "See through the feed: channel credibility scoring and one-click recommendation control for YouTube.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://www.youtube.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    },
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["harvester.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ]
+}
