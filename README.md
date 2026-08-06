@@ -20,6 +20,8 @@ live session; the fact-check scoring and the button UI are not written yet.
 | Injection | `Src/ui/anchors.js`, `Src/ui/inject.js` | Mounts controls on watch page, feed cards and the Shorts rail |
 | Enforcement | `Src/ui/enforce.js` | Hides blocked channels by CSS, keyed off stamped attributes |
 | Undo toast | `Src/ui/toast.js` | The countdown that makes the deferred fire reversible |
+| Settings | `Src/core/settings.js`, `Src/options/` | Provider, key, model, effort, thinking; key stored locally only |
+| Transcripts | `Src/youtube/transcript.js` | Provider chain with fallbacks — read its header before touching it |
 
 `Docs/dont-recommend.md` records what was measured about the endpoint;
 `Docs/ui-injection.md` records the anchors and the DOM traps. Read both before
@@ -87,10 +89,18 @@ Chrome forces a split the code has to respect:
 
 They talk over `Src/core/bridge.js`.
 
+## Settings
+
+Click the YouFact toolbar icon, or right-click it and choose Options. Provider,
+API key, model, effort and thinking live there, along with the claim budget.
+Use Test to verify the key before relying on it.
+
+Checks never run automatically unless you turn that on. Every check costs money,
+so the default is that YouFact does nothing until asked.
+
 ## Next
 
-- Options page: provider, API key, model, effort, thinking toggle
-- Claim extraction and scoring
+- Claim extraction, research and judging (pipeline stages 2 to 4)
 - Fact-check button UI (segmented pill; score badge with sample size)
 
 The fact-check pill is deliberately not mounted yet. There is no scoring behind

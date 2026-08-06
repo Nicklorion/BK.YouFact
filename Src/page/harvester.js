@@ -25,7 +25,14 @@ const ITEM_SELECTORS = [
   'ytd-rich-item-renderer',
   'ytd-video-renderer',
   'ytd-compact-video-renderer',
-  'yt-lockup-view-model'
+  'yt-lockup-view-model',
+  // Shorts shelves on the home feed use their own lockup, and YouTube has
+  // shipped several names for it. Listing the variants is cheaper than being
+  // wrong about which one is live.
+  'ytm-shorts-lockup-view-model',
+  'ytm-shorts-lockup-view-model-v2',
+  'shorts-lockup-view-model',
+  'ytd-reel-item-renderer'
 ].join(', ');
 
 /**

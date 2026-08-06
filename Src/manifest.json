@@ -1,10 +1,18 @@
 {
   "manifest_version": 3,
   "name": "YouFact",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "See through the feed: channel credibility scoring and one-click recommendation control for YouTube.",
   "permissions": ["storage"],
-  "host_permissions": ["https://www.youtube.com/*"],
+  "host_permissions": ["https://www.youtube.com/*", "https://api.anthropic.com/*"],
+  "action": {
+    "default_title": "YouFact settings",
+    "default_popup": "options.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "content_scripts": [
     {
       "matches": ["https://www.youtube.com/*"],

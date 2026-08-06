@@ -75,9 +75,34 @@ export function findItemMounts(doc = document) {
         channelId,
         channelName
       });
+    } else {
+      const fallback = deriveOverlayFrom(element);
+      if (fallback) mounts.push({ key: `item:${channelId}`, ...fallback, channelId, channelName });
     }
   }
   return mounts;
+}
+
+/**
+ * Last-resort anchor for card shapes we have not measured — Shorts shelves on
+ * the home feed being the case that prompted it.
+ *
+ * Derived entirely from layout: find the card's own ⋮, take the positioned box
+ * it sits in, and mount into that box's positioning context. No tag names, no
+ * class names, so it adapts to card types that did not exist when this was
+ * written.
+ */
+function deriveOverlayFrom(element) {
+  const native = [...element.querySelectorAll('button')].find(
+    (button) => !button.hasAttribute('data-youfact-ui') && button.getBoundingClientRect().width > 0
+  );
+  if (!native) return null;
+
+  const holder = native.offsetParent;
+  const container = holder?.offsetParent;
+  if (!holder || !container || !element.contains(container)) return null;
+
+  return { container, position: 'append', placement: 'overlay', alignTo: holder };
 }
 
 /** The Shorts action rail — our control goes above Like, per the design. */
