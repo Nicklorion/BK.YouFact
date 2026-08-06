@@ -41,49 +41,121 @@ export function readVideoMetadata(win = window) {
   };
 }
 
-function segmentsFromDom(doc = document) {
-  const nodes = doc.querySelectorAll('ytd-transcript-segment-renderer');
-  const segments = [];
-
-  for (const node of nodes) {
-    // Read the bound payload, never the rendered text: the DOM shows a
-    // formatted timestamp, the payload has exact millisecond bounds.
-    const data = node.data;
-    if (!data) continue;
-    const text = data.snippet?.runs?.map((run) => run.text).join('') ?? '';
-    if (!text.trim()) continue;
-    segments.push({ startMs: Number(data.startMs), endMs: Number(data.endMs), text: text.trim() });
-  }
-  return segments;
+/** "1:02:03" or "4:07" -> milliseconds. */
+export function parseTimestamp(label) {
+  if (typeof label !== 'string') return null;
+  const parts = label.trim().split(':').map(Number);
+  if (parts.some((part) => !Number.isFinite(part))) return null;
+  const seconds = parts.reduce((total, part) => total * 60 + part, 0);
+  return seconds * 1000;
 }
 
-/** Parse a captured `/youtubei/v1/get_transcript` response body. */
-export function segmentsFromResponse(body) {
+/**
+ * Segments out of any transcript payload, in either schema.
+ *
+ * Legacy (`ytd-transcript-segment-renderer`):
+ *   transcriptSegmentRenderer.{startMs, endMs, snippet.runs[].text}
+ *
+ * Modern (`transcript-segment-view-model`, current on 2.20260805.01.00):
+ *   macroMarkersPanelItemViewModel.item.timelineItemViewModel
+ *     .timestamp                                            "0:06"
+ *     .contentItems[].transcriptSegmentViewModel.simpleText
+ *
+ * The modern schema carries no millisecond bounds at all, only the display
+ * timestamp, so start times are parsed from it and each segment's end is
+ * inferred from the next one's start.
+ */
+export function segmentsFromPayload(root) {
   const segments = [];
   const seen = new WeakSet();
 
   (function walk(node, depth) {
-    if (!node || typeof node !== 'object' || depth > 40 || seen.has(node)) return;
+    if (!node || typeof node !== 'object' || depth > 45 || seen.has(node)) return;
     seen.add(node);
     if (Array.isArray(node)) {
       for (const value of node) walk(value, depth + 1);
       return;
     }
-    const segment = node.transcriptSegmentRenderer;
-    if (segment) {
-      const text = segment.snippet?.runs?.map((run) => run.text).join('') ?? '';
+
+    const legacy = node.transcriptSegmentRenderer;
+    if (legacy) {
+      const text = legacy.snippet?.runs?.map((run) => run.text).join('') ?? '';
       if (text.trim()) {
-        segments.push({
-          startMs: Number(segment.startMs),
-          endMs: Number(segment.endMs),
-          text: text.trim()
-        });
+        segments.push({ startMs: Number(legacy.startMs), endMs: Number(legacy.endMs), text: text.trim() });
       }
     }
-    for (const key in node) walk(node[key], depth + 1);
-  })(body, 0);
 
-  return segments;
+    const timeline = node.timelineItemViewModel;
+    if (timeline) {
+      const text = (timeline.contentItems ?? [])
+        .map((item) => item.transcriptSegmentViewModel?.simpleText ?? '')
+        .join(' ')
+        .trim();
+      const startMs = parseTimestamp(timeline.timestamp);
+      if (text && startMs != null) segments.push({ startMs, endMs: null, text });
+    }
+
+    for (const key in node) walk(node[key], depth + 1);
+  })(root, 0);
+
+  segments.sort((a, b) => a.startMs - b.startMs);
+
+  // Fill in the ends the modern schema omits. Two segments can share a display
+  // timestamp — the label only has second resolution — so the next start is not
+  // always greater and a naive fill produces zero-length spans.
+  const DEFAULT_SPAN_MS = 5000;
+  return segments.map((segment, index) => {
+    if (Number.isFinite(segment.endMs) && segment.endMs > segment.startMs) return segment;
+    const nextStart = segments[index + 1]?.startMs;
+    const endMs =
+      Number.isFinite(nextStart) && nextStart > segment.startMs
+        ? nextStart
+        : segment.startMs + DEFAULT_SPAN_MS;
+    return { ...segment, endMs };
+  });
+}
+
+/**
+ * Element payloads live in two places depending on architecture: legacy Polymer
+ * renderers expose `.data`; modern view models set `.data` to a symbol and put
+ * the payload behind a signal accessor at `rawProps.data`. The transcript panel
+ * migrated to the latter, which is what broke reading it.
+ */
+function payloadOf(element) {
+  const data = element.data;
+  if (data && typeof data === 'object') return data;
+
+  const raw = element.rawProps?.data;
+  if (typeof raw === 'function') {
+    try {
+      return raw();
+    } catch {
+      return null;
+    }
+  }
+  return raw && typeof raw === 'object' ? raw : null;
+}
+
+/** Kept as the published name; both schemas route through the same parser. */
+export const segmentsFromResponse = segmentsFromPayload;
+
+function segmentsFromDom(doc = document) {
+  // Legacy elements bound their own payload per segment.
+  const legacy = [...doc.querySelectorAll('ytd-transcript-segment-renderer')]
+    .map((node) => node.data)
+    .filter(Boolean);
+  if (legacy.length) return segmentsFromPayload(legacy);
+
+  // The modern panel binds the whole transcript to one section list. The
+  // individual `timeline-item-view-model` elements carry no payload of their
+  // own, so the section list is the only route.
+  for (const node of doc.querySelectorAll('yt-section-list-renderer')) {
+    const data = payloadOf(node);
+    if (!data) continue;
+    const segments = segmentsFromPayload(data);
+    if (segments.length) return segments;
+  }
+  return [];
 }
 
 /**
@@ -244,7 +316,9 @@ export async function extractTranscript({ win = window, doc = document, timeoutM
       hasCaptions,
       expandedDescription: expanded,
       clickedButton: (button.textContent ?? '').trim().slice(0, 40),
-      panelPresent: Boolean(doc.querySelector('ytd-transcript-renderer')),
+      panelPresent: Boolean(
+        doc.querySelector('ytd-transcript-renderer, transcript-segment-view-model, yt-section-list-renderer')
+      ),
       capturedResponse: Boolean(win.__youfactTranscriptCapture?.body)
     }
   };
