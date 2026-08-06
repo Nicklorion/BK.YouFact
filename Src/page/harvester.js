@@ -173,6 +173,7 @@ function start() {
       postFromPage(MESSAGE.TRANSCRIPT_RESULT, {
         source: result.source,
         metadata: result.metadata,
+        diagnostics: result.diagnostics ?? null,
         segmentCount: result.segments.length,
         passages: toPassages(result.segments)
       });

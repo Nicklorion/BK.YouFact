@@ -64,19 +64,28 @@ const injector = createInjector({ onActivate: activateBlock });
 /** Ask the MAIN world for a transcript. Resolves with whatever it managed to get. */
 function requestTranscript() {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      const index = transcriptWaiters.indexOf(resolve);
-      if (index >= 0) transcriptWaiters.splice(index, 1);
-      resolve({ source: 'timeout', passages: [] });
-    }, TRANSCRIPT_TIMEOUT_MS);
-
-    transcriptWaiters.push((result) => {
+    const waiter = (result) => {
       clearTimeout(timer);
       resolve(result);
-    });
+    };
+    const timer = setTimeout(() => {
+      const index = transcriptWaiters.indexOf(waiter);
+      if (index >= 0) transcriptWaiters.splice(index, 1);
+      resolve({ source: 'no-response-from-page', passages: [] });
+    }, TRANSCRIPT_TIMEOUT_MS);
+
+    transcriptWaiters.push(waiter);
     postFromContent(MESSAGE.TRANSCRIPT_REQUEST, {});
   });
 }
+
+const TRANSCRIPT_MESSAGE = {
+  'no-captions': 'this video has no captions',
+  'button-not-found': 'no transcript button',
+  'panel-never-populated': 'transcript did not load',
+  'no-response-from-page': 'page script not responding',
+  error: 'transcript error'
+};
 
 const FAIL_MESSAGE = {
   'not-configured': 'add an API key in settings',
@@ -145,7 +154,9 @@ async function startCheck(videoId, channelId, { force = false } = {}) {
 
   const transcript = await requestTranscript();
   if (!transcript.passages?.length) {
-    watchPill?.setState({ kind: 'error', message: 'no transcript' });
+    // Report why, not just that. The source tells us which step gave up.
+    console.warn('[youfact] transcript unavailable', transcript.source, transcript.diagnostics ?? {});
+    watchPill?.setState({ kind: 'error', message: TRANSCRIPT_MESSAGE[transcript.source] ?? transcript.source });
     return;
   }
 

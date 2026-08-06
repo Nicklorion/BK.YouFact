@@ -137,16 +137,39 @@ export function installTranscriptCapture(win = window) {
   return store;
 }
 
+const TRANSCRIPT_LABELS =
+  /transcript|transcriptie|transcripción|transcrição|transcription|abschrift|trascrizione|字幕|文字起こし|расшифровка|무료 자막/i;
+
+/**
+ * The "Show transcript" button lives inside the video description, which loads
+ * collapsed. Measured: the button exists in the DOM but has a zero-width box
+ * until the description is expanded, so any visibility-filtered search misses
+ * it. Expanding first is the difference between finding it and not.
+ */
+function expandDescription(doc = document) {
+  const expand =
+    doc.querySelector('ytd-text-inline-expander #expand') ??
+    doc.querySelector('tp-yt-paper-button#expand') ??
+    doc.querySelector('#description-inline-expander #expand');
+  if (!expand) return false;
+  if (expand.getBoundingClientRect().width === 0) return false;
+  expand.click();
+  return true;
+}
+
 function findTranscriptButton(doc = document) {
-  // Text-matched because there is no stable structural handle for this control,
-  // and the label is one of the few YouTube strings we can enumerate cheaply.
-  // Failure here is recoverable — it just means no transcript for this video.
-  const labels = /transcript|transcriptie|transcripción|transcription|abschrift|字幕|расшифровка/i;
-  return [...doc.querySelectorAll('button')].find((button) => {
-    if (button.hasAttribute('data-youfact-ui')) return false;
-    if (button.getBoundingClientRect().width === 0) return false;
-    return labels.test(`${button.textContent ?? ''} ${button.getAttribute('aria-label') ?? ''}`);
-  });
+  // Text-matched because this control has no stable structural handle. Failure
+  // is recoverable — it just means no transcript for this video.
+  const matches = (button) =>
+    TRANSCRIPT_LABELS.test(`${button.textContent ?? ''} ${button.getAttribute('aria-label') ?? ''}`);
+
+  const buttons = [...doc.querySelectorAll('button')].filter(
+    (button) => !button.hasAttribute('data-youfact-ui') && matches(button)
+  );
+
+  // Prefer one that is actually laid out; fall back to a hidden match, since
+  // clicking it still works and costs nothing to try.
+  return buttons.find((button) => button.getBoundingClientRect().width > 0) ?? buttons[0] ?? null;
 }
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -172,8 +195,31 @@ export async function extractTranscript({ win = window, doc = document, timeoutM
   }
 
   // 3. Ask YouTube to fetch it, then take whichever route lands first.
-  const button = findTranscriptButton(doc);
-  if (!button) return { segments: [], source: 'unavailable', metadata };
+  //    Diagnostics are deliberately specific: "no transcript" is useless when
+  //    the real answer is "this video has no captions" or "the button moved".
+  const hasCaptions = (metadata?.captionLanguages?.length ?? 0) > 0;
+
+  let button = findTranscriptButton(doc);
+  let expanded = false;
+  if (!button) {
+    expanded = expandDescription(doc);
+    if (expanded) {
+      // The description animates open; the button is not laid out immediately.
+      for (let attempt = 0; attempt < 12 && !button; attempt += 1) {
+        await wait(POLL_MS);
+        button = findTranscriptButton(doc);
+      }
+    }
+  }
+
+  if (!button) {
+    return {
+      segments: [],
+      source: hasCaptions ? 'button-not-found' : 'no-captions',
+      metadata,
+      diagnostics: { hasCaptions, expandedDescription: expanded }
+    };
+  }
 
   button.click();
   const deadline = Date.now() + timeoutMs;
@@ -190,7 +236,18 @@ export async function extractTranscript({ win = window, doc = document, timeoutM
     }
   }
 
-  return { segments: [], source: 'timeout', metadata };
+  return {
+    segments: [],
+    source: 'panel-never-populated',
+    metadata,
+    diagnostics: {
+      hasCaptions,
+      expandedDescription: expanded,
+      clickedButton: (button.textContent ?? '').trim().slice(0, 40),
+      panelPresent: Boolean(doc.querySelector('ytd-transcript-renderer')),
+      capturedResponse: Boolean(win.__youfactTranscriptCapture?.body)
+    }
+  };
 }
 
 /**
