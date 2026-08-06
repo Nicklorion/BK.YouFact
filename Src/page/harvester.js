@@ -18,7 +18,8 @@
 import { describeItem, findFeedbackTokens } from '../youtube/schema.js';
 import { readClientConfig } from '../youtube/innertube.js';
 import { runCanaries } from '../core/canary.js';
-import { MESSAGE, postFromPage } from '../core/bridge.js';
+import { MESSAGE, listenInPage, postFromPage } from '../core/bridge.js';
+import { extractTranscript, installTranscriptCapture, toPassages } from '../youtube/transcript.js';
 
 /** Cards in a feed, grid or sidebar — safe to hide when their channel is blocked. */
 const ITEM_SELECTORS = [
@@ -160,6 +161,29 @@ function scheduleRescan() {
 
 function start() {
   publish();
+
+  // Must be installed before YouTube fetches a transcript, so a panel the user
+  // opens themselves is captured rather than missed.
+  installTranscriptCapture();
+
+  listenInPage(async (type) => {
+    if (type !== MESSAGE.TRANSCRIPT_REQUEST) return;
+    try {
+      const result = await extractTranscript();
+      postFromPage(MESSAGE.TRANSCRIPT_RESULT, {
+        source: result.source,
+        metadata: result.metadata,
+        segmentCount: result.segments.length,
+        passages: toPassages(result.segments)
+      });
+    } catch (error) {
+      postFromPage(MESSAGE.TRANSCRIPT_RESULT, {
+        source: 'error',
+        message: String(error?.message ?? error),
+        passages: []
+      });
+    }
+  });
 
   // Attributes are deliberately not observed: stamping would otherwise
   // retrigger the observer that caused it.

@@ -7,7 +7,8 @@ const options = {
   entryPoints: {
     content: 'Src/content/index.js',
     harvester: 'Src/page/harvester.js',
-    options: 'Src/options/options.js'
+    options: 'Src/options/options.js',
+    worker: 'Src/background/worker.js'
   },
   outdir: 'Dist',
   bundle: true,

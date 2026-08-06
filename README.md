@@ -98,11 +98,24 @@ Use Test to verify the key before relying on it.
 Checks never run automatically unless you turn that on. Every check costs money,
 so the default is that YouFact does nothing until asked.
 
+## Fact-checking
+
+The pill sits beside Like on the watch page. Clicking it runs five stages:
+
+1. **Transcribe** — segments and timestamps, grouped into ~45s passages
+2. **Extract claims** — checkable assertions only; opinion and prediction dropped
+3. **Research** — server-side web search, sources captured verbatim
+4. **Judge** — a verdict per claim, citing only sources from stage 3
+5. **Score** — arithmetic over verdicts, no model, fully reproducible
+
+The badge shows one number and never without its sample size. Click it for the
+claim list; click a claim for the quote, the reasoning and the sources.
+
+Unverified claims are excluded from accuracy rather than counted against it —
+failing to find evidence is not evidence of falsehood.
+
 ## Next
 
-- Claim extraction, research and judging (pipeline stages 2 to 4)
-- Fact-check button UI (segmented pill; score badge with sample size)
-
-The fact-check pill is deliberately not mounted yet. There is no scoring behind
-it, and a control that renders live but reaches nothing is worse than no control
-at all.
+- Channel-level checking beyond aggregating per-video scores
+- The shared index (v2) once the record schema stops moving
+- Comment reply drafting, grounded in the evidence already fetched
