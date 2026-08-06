@@ -1,9 +1,9 @@
 /**
- * ISOLATED-world content script — the side that decides and persists.
+ * ISOLATED-world content script — the side that decides, persists and renders.
  *
- * Owns chrome.storage, the blocklist, the token cache and the outbound
- * InnerTube call. Receives page state from the MAIN-world harvester over the
- * bridge, because neither world can see both halves.
+ * Owns chrome.storage, the blocklist, the token cache, the outbound InnerTube
+ * call and the injected UI. Receives page state from the MAIN-world harvester
+ * over the bridge, because neither world can see both halves.
  *
  * The fetch runs here rather than in the page: content scripts share the
  * document's cookie jar, so same-origin requests carry YouTube's cookies and
@@ -14,17 +14,47 @@ import { createTokenCache } from '../core/tokenCache.js';
 import { createBlocklist } from '../core/blocklist.js';
 import { createDontRecommend, OUTCOME } from '../core/dontRecommend.js';
 import { MESSAGE, listenInContent } from '../core/bridge.js';
+import { installStyles } from '../ui/styles.js';
+import { createEnforcer } from '../ui/enforce.js';
+import { createInjector } from '../ui/inject.js';
+import { showUndoToast } from '../ui/toast.js';
+
+/** The user's only chance to take it back — YouTube provides no undo. */
+const UNDO_WINDOW_MS = 5000;
 
 const cache = createTokenCache();
 const blocklist = createBlocklist();
+const enforcer = createEnforcer();
 
 let clientConfig = null;
 
 const dontRecommend = createDontRecommend({
   cache,
   blocklist,
-  getClientConfig: () => clientConfig
+  getClientConfig: () => clientConfig,
+  undoWindowMs: UNDO_WINDOW_MS
 });
+
+function syncEnforcement() {
+  enforcer.apply(blocklist.all().map((entry) => entry.channelId));
+}
+
+function activate(channelId, channelName) {
+  const { undo } = dontRecommend.request(channelId, { name: channelName });
+  syncEnforcement();
+
+  showUndoToast({
+    message: `No longer recommending ${channelName ?? 'this channel'}`,
+    windowMs: UNDO_WINDOW_MS,
+    onUndo: async () => {
+      await undo();
+      syncEnforcement();
+      injector.refresh();
+    }
+  });
+}
+
+const injector = createInjector({ onActivate: activate });
 
 listenInContent((type, payload) => {
   if (type === MESSAGE.HARVEST) {
@@ -52,12 +82,18 @@ window.addEventListener('pagehide', () => {
   void cache.flush();
 });
 
-// Harvest messages can arrive before storage finishes loading; the cache
-// tolerates that (writes land in memory and persist on the next flush).
-void Promise.all([cache.load(), blocklist.load()]);
+installStyles();
+injector.start();
+
+// Harvest messages can arrive before storage resolves; both stores are written
+// so that in-memory state is never displaced by an older persisted copy.
+void Promise.all([cache.load(), blocklist.load()]).then(() => {
+  syncEnforcement();
+  injector.refresh();
+});
 
 /**
- * Manual driving surface until the button UI lands.
+ * Manual driving surface, useful while the fact-check UI is still unbuilt.
  * Reachable from devtools by switching the console context to the extension's
  * isolated world — see README.
  */
@@ -65,7 +101,9 @@ globalThis.__youfact = {
   cache,
   blocklist,
   dontRecommend,
+  injector,
   OUTCOME,
+  syncEnforcement,
   clientConfig: () => clientConfig,
   stats: () => ({
     cachedChannels: cache.size(),

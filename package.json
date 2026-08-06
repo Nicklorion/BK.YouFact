@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "YouTube fact checker — credibility scoring and recommendation control as a browser extension",
-  "repository": "https://github.com/Nicklorion/bk.youfact",
+  "repository": "https://github.com/Nicklorion/BK.YouFact",
   "type": "module",
   "scripts": {
     "build": "node build.mjs",

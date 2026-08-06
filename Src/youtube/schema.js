@@ -140,6 +140,42 @@ export function findVideoId(root) {
 }
 
 /**
+ * The channel's display name, for labelling controls and the blocklist.
+ *
+ * Resolved by finding text that links to a channel rather than by reaching for
+ * a known field — the byline lives at a different path in every renderer
+ * (`longBylineText`, `ownerText`, `contentMetadataViewModel`, `title`), but in
+ * all of them the visible name sits next to a browse endpoint for the channel.
+ */
+export function findChannelName(root) {
+  let name = null;
+
+  visit(root, (node) => {
+    if (name) return;
+
+    // Legacy runs: { text: 'Name', navigationEndpoint: { browseEndpoint: { browseId } } }
+    if (
+      typeof node.text === 'string' &&
+      CHANNEL_ID.test(node.navigationEndpoint?.browseEndpoint?.browseId ?? '')
+    ) {
+      name = node.text;
+      return;
+    }
+
+    // Modern parts: { text: { content: 'Name', commandRuns: [{ onTap: { innertubeCommand } }] } }
+    const content = node.text?.content;
+    if (typeof content === 'string' && Array.isArray(node.text?.commandRuns)) {
+      const linksToChannel = node.text.commandRuns.some((run) =>
+        CHANNEL_ID.test(run.onTap?.innertubeCommand?.browseEndpoint?.browseId ?? '')
+      );
+      if (linksToChannel) name = content;
+    }
+  });
+
+  return name;
+}
+
+/**
  * Everything worth extracting from one rendered item.
  * `token` is null on surfaces that don't offer the action — search results and
  * channel pages never do, only recommendation surfaces.
@@ -147,6 +183,7 @@ export function findVideoId(root) {
 export function describeItem(payload) {
   return {
     channelId: findChannelId(payload),
+    channelName: findChannelName(payload),
     videoId: findVideoId(payload),
     token: findDontRecommendToken(payload)
   };

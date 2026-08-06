@@ -5,6 +5,7 @@ import {
   findFeedbackTokens,
   findDontRecommendToken,
   findChannelId,
+  findChannelName,
   findVideoId,
   describeItem,
   ICON_DONT_RECOMMEND_CHANNEL
@@ -86,7 +87,7 @@ function legacyItem() {
   return {
     videoId: '7jW7A2glZbk',
     longBylineText: {
-      runs: [{ navigationEndpoint: { browseEndpoint: { browseId: CHANNEL } } }]
+      runs: [{ text: 'TV Archief NL', navigationEndpoint: { browseEndpoint: { browseId: CHANNEL } } }]
     },
     menu: {
       menuRenderer: {
@@ -160,9 +161,22 @@ test('describeItem reports a null token on surfaces that offer no action', () =>
 
   assert.deepEqual(describeItem(noMenu), {
     channelId: CHANNEL,
+    channelName: 'TV Archief NL',
     videoId: '7jW7A2glZbk',
     token: null
   });
+});
+
+test('resolves the channel name from either byline shape', () => {
+  // Modern: text.content beside commandRuns; legacy: run text beside navigationEndpoint.
+  assert.equal(findChannelName(modernItem()), 'Shadow Chronicles');
+  assert.equal(findChannelName(legacyItem()), 'TV Archief NL');
+});
+
+test('does not mistake unrelated text for a channel name', () => {
+  const noByline = legacyItem();
+  delete noByline.longBylineText;
+  assert.equal(findChannelName(noByline), null);
 });
 
 test('survives the cycles YouTube payloads actually contain', () => {

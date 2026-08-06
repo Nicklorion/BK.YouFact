@@ -17,9 +17,13 @@ live session; the fact-check scoring and the button UI are not written yet.
 | Blocklist | `Src/core/blocklist.js` | Local channel blocklist — the layer that cannot break |
 | Deferred fire | `Src/core/dontRecommend.js` | Hides immediately, sends after an undo window |
 | Canaries | `Src/core/canary.js` | Detects YouTube schema drift instead of failing silently |
+| Injection | `Src/ui/anchors.js`, `Src/ui/inject.js` | Mounts controls on watch page, feed cards and the Shorts rail |
+| Enforcement | `Src/ui/enforce.js` | Hides blocked channels by CSS, keyed off stamped attributes |
+| Undo toast | `Src/ui/toast.js` | The countdown that makes the deferred fire reversible |
 
-`Docs/dont-recommend.md` records what was measured and how — read it before
-changing anything in `Src/youtube/`.
+`Docs/dont-recommend.md` records what was measured about the endpoint;
+`Docs/ui-injection.md` records the anchors and the DOM traps. Read both before
+changing anything in `Src/youtube/` or `Src/ui/`.
 
 ## Design in one paragraph
 
@@ -44,11 +48,21 @@ rebuilds on change; reload the extension to pick up changes.
 npm test
 ```
 
+## Using it
+
+A "Don't recommend" control appears in three places: under the video on the
+watch page, on hover over any feed or sidebar card, and on the Shorts rail.
+Clicking it hides the channel immediately and shows a five-second undo. Once
+that window closes the request goes to YouTube and cannot be taken back — the
+API returns no undo token.
+
+Blocked channels stay hidden across every surface, including videos that load
+later via infinite scroll.
+
 ## Poking at it
 
-The extension has no UI yet. To drive the subsystem by hand, open devtools on
-youtube.com and switch the console's context dropdown from `top` to the YouFact
-content script, then:
+To drive the subsystem by hand, open devtools on youtube.com and switch the
+console's context dropdown from `top` to the YouFact content script, then:
 
 ```js
 __youfact.stats()
@@ -75,7 +89,10 @@ They talk over `Src/core/bridge.js`.
 
 ## Next
 
+- Options page: provider, API key, model, effort, thinking toggle
+- Claim extraction and scoring
 - Fact-check button UI (segmented pill; score badge with sample size)
-- Don't-recommend button injection on thumbnails, watch page and Shorts rail
-- Blocklist enforcement — hide blocked channels on every surface
-- Claim extraction and scoring against a configurable model provider
+
+The fact-check pill is deliberately not mounted yet. There is no scoring behind
+it, and a control that renders live but reaches nothing is worse than no control
+at all.
