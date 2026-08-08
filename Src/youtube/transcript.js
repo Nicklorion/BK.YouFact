@@ -68,6 +68,9 @@ export function parseTimestamp(label) {
 export function segmentsFromPayload(root) {
   const segments = [];
   const seen = new WeakSet();
+  // The walk visits the marker parent and then descends into its own timeline
+  // child, so without this every segment would be emitted twice.
+  const consumed = new WeakSet();
 
   (function walk(node, depth) {
     if (!node || typeof node !== 'object' || depth > 45 || seen.has(node)) return;
@@ -85,12 +88,33 @@ export function segmentsFromPayload(root) {
       }
     }
 
-    const timeline = node.timelineItemViewModel;
-    if (timeline) {
-      const text = (timeline.contentItems ?? [])
+    // Anchor on the parent, not the timeline item: the authoritative numeric
+    // start time is a sibling of `item`, while the item itself carries only a
+    // display string. Measured on a real get_panel response: 235 of 235 items
+    // had startTimeSeconds.
+    const textOf = (timeline) =>
+      (timeline?.contentItems ?? [])
         .map((item) => item.transcriptSegmentViewModel?.simpleText ?? '')
         .join(' ')
         .trim();
+
+    const marker = node.macroMarkersPanelItemViewModel;
+    if (marker) {
+      const timeline = marker.item?.timelineItemViewModel;
+      if (timeline) consumed.add(timeline);
+
+      // Chapter headers ride in the same list and are not speech.
+      if (!marker.item?.timelineChapterViewModel) {
+        const text = textOf(timeline);
+        const seconds = marker.onTap?.innertubeCommand?.watchEndpoint?.startTimeSeconds;
+        const startMs =
+          typeof seconds === 'number' ? seconds * 1000 : parseTimestamp(timeline?.timestamp);
+        if (text && startMs != null) segments.push({ startMs, endMs: null, text });
+      }
+    } else if (node.timelineItemViewModel && !consumed.has(node.timelineItemViewModel)) {
+      // Rendered-DOM payloads can hand us the item without its marker parent.
+      const timeline = node.timelineItemViewModel;
+      const text = textOf(timeline);
       const startMs = parseTimestamp(timeline.timestamp);
       if (text && startMs != null) segments.push({ startMs, endMs: null, text });
     }
@@ -166,7 +190,11 @@ export function installTranscriptCapture(win = window) {
   if (win.__youfactTranscriptCapture) return win.__youfactTranscriptCapture;
 
   const store = { body: null, at: 0 };
-  const isTranscript = (url) => typeof url === 'string' && url.includes('/youtubei/v1/get_transcript');
+  // get_transcript was retired; the page calls get_panel now. Matching only the
+  // old name meant this capture could never fire.
+  const isTranscript = (url) =>
+    typeof url === 'string' &&
+    (url.includes('/youtubei/v1/get_panel') || url.includes('/youtubei/v1/get_transcript'));
 
   const originalFetch = win.fetch;
   win.fetch = async function patchedFetch(input, init) {

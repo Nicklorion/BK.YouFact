@@ -77,6 +77,67 @@ test('never produces a zero-length span when timestamps collide', () => {
   }
 });
 
+test('prefers the numeric start time over the display string', () => {
+  // Measured on a real get_panel response: every item carried startTimeSeconds,
+  // which is authoritative. The timestamp label is only second-resolution text.
+  const payload = {
+    macroMarkersPanelItemViewModel: {
+      item: {
+        timelineItemViewModel: {
+          timestamp: '0:01',
+          contentItems: [{ transcriptSegmentViewModel: { simpleText: 'Opening line.' } }]
+        }
+      },
+      onTap: { innertubeCommand: { watchEndpoint: { startTimeSeconds: 1 } } }
+    }
+  };
+
+  const segments = segmentsFromPayload(payload);
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0].startMs, 1000);
+  assert.equal(segments[0].text, 'Opening line.');
+});
+
+test('falls back to the display string when no numeric time is present', () => {
+  const payload = {
+    macroMarkersPanelItemViewModel: {
+      item: {
+        timelineItemViewModel: {
+          timestamp: '2:05',
+          contentItems: [{ transcriptSegmentViewModel: { simpleText: 'Later line.' } }]
+        }
+      }
+    }
+  };
+  assert.equal(segmentsFromPayload(payload)[0].startMs, 125000);
+});
+
+test('skips chapter headers, which ride the same list but are not speech', () => {
+  const payload = [
+    {
+      macroMarkersPanelItemViewModel: {
+        item: { timelineChapterViewModel: { title: 'Chapter one' } },
+        onTap: { innertubeCommand: { watchEndpoint: { startTimeSeconds: 0 } } }
+      }
+    },
+    {
+      macroMarkersPanelItemViewModel: {
+        item: {
+          timelineItemViewModel: {
+            timestamp: '0:30',
+            contentItems: [{ transcriptSegmentViewModel: { simpleText: 'Actual speech.' } }]
+          }
+        },
+        onTap: { innertubeCommand: { watchEndpoint: { startTimeSeconds: 30 } } }
+      }
+    }
+  ];
+
+  const segments = segmentsFromPayload(payload);
+  assert.equal(segments.length, 1, 'chapter header must not become a segment');
+  assert.equal(segments[0].text, 'Actual speech.');
+});
+
 test('groups fragments into passages a model can reason over', () => {
   const segments = Array.from({ length: 30 }, (_, index) => ({
     startMs: index * 2000,

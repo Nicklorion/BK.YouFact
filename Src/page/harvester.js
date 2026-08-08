@@ -19,7 +19,12 @@ import { describeItem, findFeedbackTokens } from '../youtube/schema.js';
 import { readClientConfig } from '../youtube/innertube.js';
 import { runCanaries } from '../core/canary.js';
 import { MESSAGE, listenInPage, postFromPage } from '../core/bridge.js';
-import { extractTranscript, installTranscriptCapture, toPassages } from '../youtube/transcript.js';
+import {
+  extractTranscript,
+  installTranscriptCapture,
+  readVideoMetadata,
+  toPassages
+} from '../youtube/transcript.js';
 
 /** Cards in a feed, grid or sidebar — safe to hide when their channel is blocked. */
 const ITEM_SELECTORS = [
@@ -167,6 +172,13 @@ function start() {
   installTranscriptCapture();
 
   listenInPage(async (type) => {
+    if (type === MESSAGE.METADATA_REQUEST) {
+      // Needed on every route: the direct API returns a transcript but no idea
+      // what video it belongs to, and a model judging claims without the title
+      // or channel is judging blind.
+      postFromPage(MESSAGE.METADATA_RESULT, readVideoMetadata());
+      return;
+    }
     if (type !== MESSAGE.TRANSCRIPT_REQUEST) return;
     try {
       const result = await extractTranscript();

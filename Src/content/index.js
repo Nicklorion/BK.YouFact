@@ -34,6 +34,7 @@ const enforcer = createEnforcer();
 
 let clientConfig = null;
 const transcriptWaiters = [];
+const metadataWaiters = [];
 
 const dontRecommend = createDontRecommend({
   cache,
@@ -63,23 +64,31 @@ function activateBlock(channelId, channelName) {
 
 const injector = createInjector({ onActivate: activateBlock });
 
-/** Ask the MAIN world for a transcript. Resolves with whatever it managed to get. */
-function requestTranscript() {
+/**
+ * Ask the MAIN world for something and wait for its reply.
+ * Only the page can read ytInitialPlayerResponse and element payloads.
+ */
+function askPage(requestType, waiters, fallback, timeoutMs = TRANSCRIPT_TIMEOUT_MS) {
   return new Promise((resolve) => {
     const waiter = (result) => {
       clearTimeout(timer);
       resolve(result);
     };
     const timer = setTimeout(() => {
-      const index = transcriptWaiters.indexOf(waiter);
-      if (index >= 0) transcriptWaiters.splice(index, 1);
-      resolve({ source: 'no-response-from-page', passages: [] });
-    }, TRANSCRIPT_TIMEOUT_MS);
+      const index = waiters.indexOf(waiter);
+      if (index >= 0) waiters.splice(index, 1);
+      resolve(fallback);
+    }, timeoutMs);
 
-    transcriptWaiters.push(waiter);
-    postFromContent(MESSAGE.TRANSCRIPT_REQUEST, {});
+    waiters.push(waiter);
+    postFromContent(requestType, {});
   });
 }
+
+const requestTranscript = () =>
+  askPage(MESSAGE.TRANSCRIPT_REQUEST, transcriptWaiters, { source: 'no-response-from-page', passages: [] });
+
+const requestMetadata = () => askPage(MESSAGE.METADATA_REQUEST, metadataWaiters, null, 5000);
 
 const TRANSCRIPT_MESSAGE = {
   'no-captions': 'this video has no captions',
@@ -159,9 +168,12 @@ async function startCheck(videoId, channelId, { force = false } = {}) {
   let transcript = null;
   const direct = await fetchTranscript({ videoId, clientConfig });
   if (direct.ok) {
+    // The API returns words but no idea which video they belong to. Ask the
+    // page separately — a model judging claims without the title or channel is
+    // judging blind.
     transcript = {
       source: 'get_panel',
-      metadata: null,
+      metadata: await requestMetadata(),
       passages: toPassages(direct.segments)
     };
   } else {
@@ -239,8 +251,12 @@ listenInContent((type, payload) => {
   }
 
   if (type === MESSAGE.TRANSCRIPT_RESULT) {
-    const waiter = transcriptWaiters.shift();
-    waiter?.(payload);
+    transcriptWaiters.shift()?.(payload);
+    return;
+  }
+
+  if (type === MESSAGE.METADATA_RESULT) {
+    metadataWaiters.shift()?.(payload);
     return;
   }
 

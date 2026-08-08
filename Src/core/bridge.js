@@ -22,7 +22,10 @@ export const MESSAGE = Object.freeze({
   /** ISOLATED -> MAIN: extract a transcript for the current video. */
   TRANSCRIPT_REQUEST: 'transcript-request',
   /** MAIN -> ISOLATED: the result, including which provider produced it. */
-  TRANSCRIPT_RESULT: 'transcript-result'
+  TRANSCRIPT_RESULT: 'transcript-result',
+  /** ISOLATED -> MAIN: video title, channel, duration, description. */
+  METADATA_REQUEST: 'metadata-request',
+  METADATA_RESULT: 'metadata-result'
 });
 
 /** MAIN -> ISOLATED. */
