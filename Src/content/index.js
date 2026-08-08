@@ -20,6 +20,8 @@ import { createInjector } from '../ui/inject.js';
 import { showUndoToast } from '../ui/toast.js';
 import { createFactCheckPill, createPanel, MARKER } from '../ui/factCheck.js';
 import { findWatchMount } from '../ui/anchors.js';
+import { fetchTranscript } from '../youtube/transcriptApi.js';
+import { toPassages } from '../youtube/transcript.js';
 
 /** The user's only chance to take it back — YouTube provides no undo. */
 const UNDO_WINDOW_MS = 5000;
@@ -152,7 +154,21 @@ async function startCheck(videoId, channelId, { force = false } = {}) {
 
   watchPill?.setState({ kind: 'running', stage: 'extract' });
 
-  const transcript = await requestTranscript();
+  // Preferred route: ask the API directly. Needs no UI, no description
+  // expansion and no click, so it cannot be broken by a layout change.
+  let transcript = null;
+  const direct = await fetchTranscript({ videoId, clientConfig });
+  if (direct.ok) {
+    transcript = {
+      source: 'get_panel',
+      metadata: null,
+      passages: toPassages(direct.segments)
+    };
+  } else {
+    console.info('[youfact] direct transcript unavailable, falling back to the panel', direct.reason);
+    transcript = await requestTranscript();
+  }
+
   if (!transcript.passages?.length) {
     // Report why, not just that. The source tells us which step gave up.
     console.warn('[youfact] transcript unavailable', transcript.source, transcript.diagnostics ?? {});
