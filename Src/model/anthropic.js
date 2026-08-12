@@ -350,7 +350,7 @@ Transcripts are auto-generated and contain errors. If a passage is too garbled t
 
 Prefer claims that matter to the video's argument over trivia that happens to be checkable.`;
 
-const RESEARCH_SYSTEM = `You research one factual claim using web search, then report what you found.
+export const RESEARCH_SYSTEM = `You research one factual claim using web search, then report what you found.
 
 Always search before answering. Do not answer from your own knowledge — your knowledge has a cutoff, the claim may concern events after it, and a verdict reached without a source cannot be cited. Search even when you believe you already know the answer.
 
