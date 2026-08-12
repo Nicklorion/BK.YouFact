@@ -40,10 +40,60 @@ function stubFetch(response) {
   return impl;
 }
 
-test('reports missing configuration rather than firing a doomed request', async () => {
-  const result = await fetchTranscript({ videoId: 'abcdefghijk', clientConfig: null });
+test('refuses only when there is no video id — that is the one required input', async () => {
+  const result = await fetchTranscript({ videoId: '', clientConfig });
   assert.equal(result.ok, false);
-  assert.equal(result.reason, 'no-client-config');
+  assert.equal(result.reason, 'no-video-id');
+});
+
+test('fires without a client config, because the endpoint does not need one', async () => {
+  // Measured: a hand-built minimal context returns the same 198 segments as
+  // the real ytcfg one. Refusing to try without ytcfg turned a working route
+  // into a dead one whenever the harvester had not reported yet.
+  const fetchImpl = stubFetch({ ok: true, status: 200, json: async () => ({ contents: [] }) });
+  const result = await fetchTranscript({
+    videoId: 'abcdefghijk',
+    clientConfig: null,
+    buildAuth: async () => 'SAPISIDHASH test',
+    fetchImpl
+  });
+
+  assert.equal(result.reason, 'no-captions', 'reached the server rather than short-circuiting');
+  const body = JSON.parse(fetchImpl.calls[0].init.body);
+  assert.equal(body.context.client.clientName, 'WEB');
+  assert.ok(body.context.client.clientVersion, 'substituted context must carry a version');
+});
+
+test('sends the request unsigned when there is no cookie to sign with', async () => {
+  // buildAuthHeader throws for a signed-out user, or one whose browser
+  // partitions Google's cookies. The endpoint answers unauthenticated, so that
+  // throw must not take the request down with it.
+  const fetchImpl = stubFetch({ ok: true, status: 200, json: async () => ({ contents: [] }) });
+  const result = await fetchTranscript({
+    videoId: 'abcdefghijk',
+    clientConfig,
+    buildAuth: async () => {
+      throw new Error('not signed in to YouTube — no SAPISID cookie');
+    },
+    fetchImpl
+  });
+
+  assert.equal(result.reason, 'no-captions', 'must not be reported as a network failure');
+  const { headers } = fetchImpl.calls[0].init;
+  assert.equal(headers.authorization, undefined, 'no header beats a broken one');
+  assert.equal(headers['x-goog-authuser'], undefined);
+});
+
+test('omits the visitor id header rather than sending it empty', async () => {
+  const fetchImpl = stubFetch({ ok: true, status: 200, json: async () => ({ contents: [] }) });
+  await fetchTranscript({
+    videoId: 'abcdefghijk',
+    clientConfig: { clientVersion: '2.20260807.00.00', context: { client: { clientName: 'WEB' } } },
+    buildAuth: async () => 'SAPISIDHASH test',
+    fetchImpl
+  });
+
+  assert.equal(fetchImpl.calls[0].init.headers['x-goog-visitor-id'], undefined);
 });
 
 test('treats a 200 with no segments as no-captions, not as an error', async () => {

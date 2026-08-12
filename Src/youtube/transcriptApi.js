@@ -20,12 +20,34 @@
  * So a transcript can be pulled for ANY video id without ever loading its page.
  * Verified: fetching a different video's transcript from an unrelated watch page
  * returned 85 segments with correct text.
+ *
+ * What the endpoint actually requires was measured against client
+ * 2.20260811.01.00, one video, four variants, all returning 198 segments:
+ *
+ *   full ytcfg context + cookies + SAPISIDHASH   200, 198 segments
+ *   full ytcfg context, no cookies, no auth      200, 198 segments
+ *   hand-built minimal context, no cookies       200, 198 segments
+ *   minimal context with a year-old version      200, 198 segments
+ *
+ * So it needs the video id and nothing else. Every other input is an
+ * optimisation, and treating any of them as mandatory turns a working route
+ * into a dead one for anyone signed out or running restrictive cookie
+ * settings. They are all sent when available and never required.
  */
 
 import { buildAuthHeader, ORIGIN } from './auth.js';
 import { segmentsFromPayload } from './transcript.js';
 
 const PANEL_ID = 'PAmodern_transcript_view';
+
+/**
+ * Used when `ytcfg` never arrived. The version is a floor, not a claim about
+ * what is live — the server accepted a version a year stale, so this only has
+ * to parse.
+ */
+const FALLBACK_CONTEXT = Object.freeze({
+  client: Object.freeze({ clientName: 'WEB', clientVersion: '2.20260811.01.00', hl: 'en', gl: 'US' })
+});
 
 /** Minimal protobuf varint — ids are short, so lengths never exceed one byte in practice. */
 function varint(value) {
@@ -56,12 +78,12 @@ export function buildTranscriptParams(videoId) {
 /**
  * Fetch a transcript for any video id.
  *
- * Runs in the ISOLATED content script: it shares the document's cookie jar so
- * the request is authenticated, and `document.cookie` still yields SAPISID for
- * signing. That means transcripts no longer depend on the MAIN world or on any
- * UI being present.
+ * Runs in the ISOLATED content script, so transcripts depend on neither the
+ * MAIN world nor any UI being present. `clientConfig` is used when the
+ * harvester has shipped it and substituted when it has not — the only input
+ * that actually matters is the video id.
  *
- * @param {{videoId: string, clientConfig: object, fetchImpl?: typeof fetch,
+ * @param {{videoId: string, clientConfig?: object|null, fetchImpl?: typeof fetch,
  *          buildAuth?: () => Promise<string>}} options
  * @returns {Promise<{ok: boolean, segments: Array, status: number, reason?: string}>}
  */
@@ -72,28 +94,45 @@ export async function fetchTranscript({
   buildAuth = buildAuthHeader
 }) {
   if (!videoId) return { ok: false, segments: [], status: 0, reason: 'no-video-id' };
-  if (!clientConfig?.context) {
-    return { ok: false, segments: [], status: 0, reason: 'no-client-config' };
+
+  const context = clientConfig?.context ?? FALLBACK_CONTEXT;
+  const visitorData = context.client?.visitorData;
+  const clientVersion = clientConfig?.clientVersion ?? FALLBACK_CONTEXT.client.clientVersion;
+
+  // Signing is an optimisation, not a requirement: the endpoint answers
+  // unauthenticated. `buildAuth` throws when there is no SAPISID cookie — for
+  // a signed-out user, or a browser partitioning Google's cookies — and
+  // letting that throw propagate would fail a request that would have
+  // succeeded.
+  let authorization = null;
+  try {
+    authorization = await buildAuth();
+  } catch {
+    /* not signed in; the request does not need it */
   }
 
-  const visitorData = clientConfig.context?.client?.visitorData ?? '';
+  const headers = {
+    'content-type': 'application/json',
+    'x-origin': ORIGIN,
+    'x-youtube-client-name': '1',
+    'x-youtube-client-version': clientVersion
+  };
+  // Sending an empty visitor id or a null authorization is worse than sending
+  // neither — omit rather than assert something untrue about the caller.
+  if (authorization) {
+    headers.authorization = authorization;
+    headers['x-goog-authuser'] = '0';
+  }
+  if (visitorData) headers['x-goog-visitor-id'] = visitorData;
 
   let response;
   try {
     response = await fetchImpl(`${ORIGIN}/youtubei/v1/get_panel?prettyPrint=false`, {
       method: 'POST',
       credentials: 'include',
-      headers: {
-        'content-type': 'application/json',
-        authorization: await buildAuth(),
-        'x-origin': ORIGIN,
-        'x-goog-authuser': '0',
-        'x-goog-visitor-id': visitorData,
-        'x-youtube-client-name': '1',
-        'x-youtube-client-version': clientConfig.clientVersion
-      },
+      headers,
       body: JSON.stringify({
-        context: clientConfig.context,
+        context,
         panelId: PANEL_ID,
         params: buildTranscriptParams(videoId)
       })

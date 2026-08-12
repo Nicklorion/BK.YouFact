@@ -102,29 +102,88 @@ const FAIL_MESSAGE = {
   'not-configured': 'add an API key in settings',
   'no-transcript': 'no transcript available',
   'no-claims': 'no checkable claims found',
-  'provider-error': 'provider error'
+  'provider-error': 'provider error',
+  disconnected: 'background worker stopped'
 };
 
-/** Stream a check through the service worker, reporting progress to the pill. */
+const STAGE_NAME = {
+  extract: 'reading the transcript',
+  research: 'researching claims',
+  judge: 'weighing evidence'
+};
+
+/** The last failure, kept so `__youfact.lastFailure` can explain a dead pill. */
+let lastFailure = null;
+
+/**
+ * Stream a check through the service worker, reporting progress to the pill.
+ *
+ * Resolves exactly once. The port can both deliver a verdict and then
+ * disconnect, and a disconnect can arrive with no verdict at all, so the
+ * settled flag is what keeps the two from racing.
+ */
 function runCheck(payload, onProgress) {
   return new Promise((resolve) => {
+    const startedAt = Date.now();
+    let stage = 'extract';
+    let settled = false;
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve({ stage, elapsedMs: Date.now() - startedAt, ...result });
+    };
+
     const port = chrome.runtime.connect({ name: 'youfact-check' });
+
     port.onMessage.addListener((message) => {
       if (message.stage === 'done') {
         port.disconnect();
-        resolve({ ok: true, record: message.record });
+        finish({ ok: true, record: message.record });
         return;
       }
       if (message.stage === 'failed') {
         port.disconnect();
-        resolve({ ok: false, reason: message.reason, message: message.message });
+        finish({
+          ok: false,
+          reason: message.reason,
+          message: message.message,
+          stage: message.failedStage ?? stage
+        });
         return;
       }
+      // Heartbeats carry the stage they are beating for, so this stays correct
+      // through the long silent stretches inside one stage.
+      stage = message.stage ?? stage;
       onProgress(message);
     });
-    port.onDisconnect.addListener(() => resolve({ ok: false, reason: 'disconnected' }));
+
+    port.onDisconnect.addListener(() => finish({ ok: false, reason: 'disconnected' }));
     port.postMessage({ type: 'run', payload });
   });
+}
+
+/**
+ * Turn a failure into something a person can act on.
+ *
+ * "Disconnected" on its own is the least useful thing this UI could say: it
+ * names the symptom seen from the content script and nothing about the cause.
+ * The stage and elapsed time are what distinguish a torn-down worker from a
+ * provider that rejected the request.
+ */
+function describeFailure(result) {
+  const where = STAGE_NAME[result.stage] ?? result.stage;
+  const seconds = Math.round((result.elapsedMs ?? 0) / 1000);
+
+  if (result.reason === 'disconnected') {
+    return (
+      `The background worker stopped while ${where}, ${seconds}s in. ` +
+      'Reload the extension; if it keeps happening, check the service worker ' +
+      'console at brave://extensions for the real error.'
+    );
+  }
+  if (result.message) return `Failed while ${where} after ${seconds}s — ${result.message}`;
+  return `Failed while ${where} after ${seconds}s (${result.reason}).`;
 }
 
 let watchPill = null;
@@ -155,39 +214,76 @@ function showPanel(videoId, channelId) {
   metadata.append(openPanel);
 }
 
-async function startCheck(videoId, channelId, { force = false } = {}) {
-  if (!force && checks.getVideo(videoId)) {
-    showPanel(videoId, channelId);
-    return;
-  }
-
-  watchPill?.setState({ kind: 'running', stage: 'extract' });
-
-  // Preferred route: ask the API directly. Needs no UI, no description
-  // expansion and no click, so it cannot be broken by a layout change.
-  let transcript = null;
+/**
+ * Try each route in the order it deserves.
+ *
+ * The direct API call is preferred because it needs no UI, no description
+ * expansion and no click, so no layout change can break it. It also does not
+ * need the client config or a signed-in session — see transcriptApi.js — so it
+ * is tried even when the harvester has told us nothing.
+ */
+async function acquireTranscript(videoId) {
   const direct = await fetchTranscript({ videoId, clientConfig });
   if (direct.ok) {
     // The API returns words but no idea which video they belong to. Ask the
     // page separately — a model judging claims without the title or channel is
     // judging blind.
-    transcript = {
+    return {
       source: 'get_panel',
       metadata: await requestMetadata(),
       passages: toPassages(direct.segments)
     };
-  } else {
-    console.info('[youfact] direct transcript unavailable, falling back to the panel', direct.reason);
-    transcript = await requestTranscript();
   }
+
+  // A 200 carrying no segments has two causes that are indistinguishable from
+  // the response alone: the video genuinely has no captions, or the params
+  // schema drifted under us. The player response settles it, and settling it
+  // is worth the round trip — otherwise a video with no captions spends twenty
+  // seconds driving a panel that cannot populate and then reports the wrong
+  // reason for the failure.
+  const metadata = await requestMetadata();
+  const hasCaptions = (metadata?.captionLanguages?.length ?? 0) > 0;
+  if (direct.reason === 'no-captions' && metadata && !hasCaptions) {
+    return { source: 'no-captions', metadata, passages: [] };
+  }
+
+  console.info('[youfact] direct transcript unavailable, falling back to the panel', direct.reason);
+  return requestTranscript();
+}
+
+/** The video id of the check currently in flight, or null. */
+let runningCheck = null;
+
+async function performCheck(videoId, channelId) {
+  // YouTube is a single-page app and `mountFactCheck` replaces the pill on
+  // every navigation. Writing to `watchPill` directly would paint this
+  // video's progress onto whatever video the user moved on to, so the pill is
+  // captured here and written to only while it is still the mounted one.
+  const pill = watchPill;
+  const setPill = (state) => {
+    if (watchPill === pill) pill?.setState(state);
+  };
+
+  setPill({ kind: 'running', stage: 'extract' });
+
+  const transcript = await acquireTranscript(videoId);
 
   if (!transcript.passages?.length) {
     // Report why, not just that. The source tells us which step gave up.
     console.warn('[youfact] transcript unavailable', transcript.source, transcript.diagnostics ?? {});
-    watchPill?.setState({ kind: 'error', message: TRANSCRIPT_MESSAGE[transcript.source] ?? transcript.source });
+    lastFailure = { at: Date.now(), videoId, phase: 'transcript', source: transcript.source, diagnostics: transcript.diagnostics ?? null };
+    setPill({
+      kind: 'error',
+      message: TRANSCRIPT_MESSAGE[transcript.source] ?? transcript.source,
+      detail: `No transcript: ${transcript.source}. See __youfact.lastFailure for details.`
+    });
     return;
   }
 
+  // Heartbeats carry neither count, so both are remembered here rather than
+  // flickering out of the label every twenty seconds.
+  let claimCount = 0;
+  let researched = null;
   const result = await runCheck(
     {
       videoId,
@@ -195,18 +291,58 @@ async function startCheck(videoId, channelId, { force = false } = {}) {
       metadata: transcript.metadata,
       passages: transcript.passages
     },
-    (progress) =>
-      watchPill?.setState({ kind: 'running', stage: progress.stage, claimCount: progress.claimCount })
+    (progress) => {
+      if (progress.claimCount) claimCount = progress.claimCount;
+      if (progress.researched != null) researched = progress.researched;
+      if (progress.stage === 'judge') researched = null;
+      setPill({
+        kind: 'running',
+        stage: progress.stage,
+        claimCount,
+        researched,
+        elapsedMs: progress.elapsedMs
+      });
+    }
   );
 
   if (!result.ok) {
-    watchPill?.setState({ kind: 'error', message: FAIL_MESSAGE[result.reason] ?? result.reason });
+    const detail = describeFailure(result);
+    lastFailure = { at: Date.now(), videoId, phase: 'check', ...result };
+    console.error('[youfact]', detail, result);
+    setPill({
+      kind: 'error',
+      message: FAIL_MESSAGE[result.reason] ?? result.reason,
+      detail
+    });
     return;
   }
 
   await checks.save(result.record);
   refreshPill(videoId, channelId);
   showPanel(videoId, channelId);
+}
+
+async function startCheck(videoId, channelId, { force = false } = {}) {
+  if (!force && checks.getVideo(videoId)) {
+    showPanel(videoId, channelId);
+    return;
+  }
+
+  // A check runs for tens of seconds and is billed to the user's own key.
+  // Without this guard every further click abandoned the run in flight and
+  // started — and paid for — a fresh one, which reads as the pill restarting
+  // itself.
+  if (runningCheck) {
+    console.info(`[youfact] a check is already running for ${runningCheck}; ignoring`);
+    return;
+  }
+
+  runningCheck = videoId;
+  try {
+    await performCheck(videoId, channelId);
+  } finally {
+    runningCheck = null;
+  }
 }
 
 function refreshPill(videoId, channelId) {
@@ -298,6 +434,14 @@ globalThis.__youfact = {
   OUTCOME,
   requestTranscript,
   clientConfig: () => clientConfig,
+  /** Why the last check died, including the stage and how long it lasted. */
+  get lastFailure() {
+    return lastFailure;
+  },
+  /** The video id of the check in flight, or null. */
+  get running() {
+    return runningCheck;
+  },
   stats: () => ({
     cachedChannels: cache.size(),
     blockedChannels: blocklist.size(),

@@ -1,4 +1,11 @@
-import { DEFAULTS, PROVIDERS, loadSettings, saveSettings, validate } from '../core/settings.js';
+import {
+  DEFAULTS,
+  PROVIDERS,
+  RESEARCH_DEPTHS,
+  loadSettings,
+  saveSettings,
+  validate
+} from '../core/settings.js';
 
 const $ = (id) => document.getElementById(id);
 const status = $('status');
@@ -49,9 +56,28 @@ function readForm() {
     effort: $('effort').value,
     thinking: $('thinking').value,
     maxClaims: Number($('maxClaims').value),
+    researchDepth: $('researchDepth').value,
     minDurationSeconds: Number($('minDurationSeconds').value),
     autoCheck: $('autoCheck').checked
   };
+}
+
+/**
+ * Searches are the part of a check that scales with both levers at once, so
+ * the ceiling is worth stating in numbers rather than leaving to be discovered
+ * on a bill.
+ */
+function renderDepthHint() {
+  const depth = RESEARCH_DEPTHS[$('researchDepth').value];
+  const claims = Number($('maxClaims').value) || 0;
+  if (!depth || !claims) {
+    $('researchDepthHint').textContent = '';
+    return;
+  }
+  $('researchDepthHint').textContent =
+    `Each claim is researched on its own. Up to ${depth.searchesPerClaim * claims} ` +
+    `web searches per video at ${claims} claims — a claim gets a verdict it can cite ` +
+    'only if the search finds something, so this is what decides how many come back unverified.';
 }
 
 function writeForm(settings) {
@@ -66,8 +92,16 @@ function writeForm(settings) {
   $('effort').value = settings.effort;
   $('thinking').value = settings.thinking;
   $('maxClaims').value = settings.maxClaims;
+
+  fillSelect(
+    $('researchDepth'),
+    Object.entries(RESEARCH_DEPTHS).map(([value, depth]) => ({ value, label: depth.label })),
+    settings.researchDepth
+  );
+
   $('minDurationSeconds').value = settings.minDurationSeconds;
   $('autoCheck').checked = settings.autoCheck;
+  renderDepthHint();
 }
 
 /**
@@ -101,6 +135,10 @@ $('provider').addEventListener('change', () => {
   const providerId = $('provider').value;
   renderProvider(providerId, PROVIDERS[providerId]?.models[0]?.id);
 });
+
+// The ceiling is the product of both, so either one moving restates it.
+$('researchDepth').addEventListener('change', renderDepthHint);
+$('maxClaims').addEventListener('input', renderDepthHint);
 
 $('reveal').addEventListener('click', () => {
   const field = $('apiKey');

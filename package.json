@@ -1,6 +1,6 @@
 {
   "name": "bk.youfact",
-  "version": "0.1.0",
+  "version": "1.0.0-rc.1",
   "private": true,
   "description": "YouTube fact checker — credibility scoring and recommendation control as a browser extension",
   "repository": "https://github.com/Nicklorion/BK.YouFact",

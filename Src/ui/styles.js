@@ -121,15 +121,14 @@ html:not([dark]) .youfact-toast { background: #0f0f0f; }
 
 /* Tones never carry meaning alone — every score is shown with its sample size. */
 .youfact-pill {
-  --tone: #909090;
   display: inline-flex; height: 36px; border-radius: 18px; overflow: hidden;
   background: rgba(0, 0, 0, 0.05); margin-left: 8px; vertical-align: middle;
 }
 html[dark] .youfact-pill { background: rgba(255, 255, 255, 0.1); }
-.youfact-pill[data-tone="good"]  { --tone: #1d9e75; }
-.youfact-pill[data-tone="mixed"] { --tone: #ba7517; }
-.youfact-pill[data-tone="poor"]  { --tone: #d85a30; }
-.youfact-pill[data-tone="thin"]  { --tone: #909090; }
+/* The pill's own tone custom properties went with the plain number they
+   coloured. The data-tone attribute is still stamped on the element as a
+   styling and debugging hook; the colour now lives in the gauge's gradient.
+   Note this whole block is a JS template literal — no backticks in here. */
 .youfact-pill button {
   border: none; background: none; font: inherit; font-size: 14px; cursor: pointer;
   color: #0f0f0f; display: inline-flex; align-items: center; gap: 6px; padding: 0 14px;
@@ -138,11 +137,45 @@ html[dark] .youfact-pill button { color: #f1f1f1; }
 .youfact-pill button:hover { background: rgba(0, 0, 0, 0.06); }
 html[dark] .youfact-pill button:hover { background: rgba(255, 255, 255, 0.08); }
 .youfact-pill button:disabled { cursor: default; }
-.youfact-pill__badge { border-left: 1px solid rgba(128, 128, 128, 0.35) !important; padding: 0 12px !important; }
-.youfact-pill__value { color: var(--tone); font-size: 15px; font-weight: 500; }
-.youfact-pill[data-tone="thin"] .youfact-pill__value { border-bottom: 2px dotted var(--tone); }
-.youfact-pill__meta { font-size: 11px; color: #8f8f8f; }
-.youfact-pill[data-kind="running"] .youfact-pill__action { opacity: .75; }
+/* Without this a disabled button still lights up under the cursor, which reads
+   as "clickable, but nothing happened". */
+.youfact-pill button:disabled:hover { background: none; }
+html[dark] .youfact-pill button:disabled:hover { background: none; }
+.youfact-pill__badge {
+  border-left: 1px solid rgba(128, 128, 128, 0.35) !important;
+  padding: 0 12px !important; gap: 8px !important;
+}
+.youfact-pill__caption { font-size: 11px; color: #8f8f8f; white-space: nowrap; }
+
+/* The score as a filled arc. Stroke widths and the type size are in viewBox
+   units, so the whole thing scales from the width attribute alone — 36 in the
+   pill, 72 in the panel — with no second set of rules. */
+.youfact-gauge { display: block; flex: none; overflow: visible; }
+.youfact-gauge__track {
+  fill: none; stroke: rgba(128, 128, 128, 0.3); stroke-width: 4; stroke-linecap: round;
+}
+.youfact-gauge__fill {
+  fill: none; stroke-width: 4; stroke-linecap: round;
+  transition: stroke-dashoffset .45s ease-out;
+}
+/* Size is set inline per value — a three-digit score needs a smaller face to
+   clear the arc than a two-digit one. See createGauge. */
+.youfact-gauge__value { font-weight: 500; fill: currentColor; }
+/* Thin evidence drops the gradient: a confident-looking arc is a lie when four
+   of twelve claims were judged. The caption says "thin" in words alongside. */
+.youfact-gauge[data-tone="thin"] .youfact-gauge__fill { stroke: #909090; }
+.youfact-gauge[data-tone="none"] .youfact-gauge__value { fill: #8f8f8f; }
+@media (prefers-reduced-motion: reduce) { .youfact-gauge__fill { transition: none; } }
+/* A check runs for tens of seconds with long silent stretches inside a single
+   stage. A static label there is indistinguishable from a hung extension, so
+   the running state breathes. */
+.youfact-pill[data-kind="running"] .youfact-pill__action {
+  opacity: .75; animation: youfact-working 1.6s ease-in-out infinite;
+}
+@keyframes youfact-working { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) {
+  .youfact-pill[data-kind="running"] .youfact-pill__action { animation: none; }
+}
 
 .youfact-panel {
   margin: 12px 0; padding: 14px; border-radius: 12px; max-width: 640px;
@@ -150,11 +183,9 @@ html[dark] .youfact-pill button:hover { background: rgba(255, 255, 255, 0.08); }
   font-size: 13px; line-height: 1.55;
 }
 html[dark] .youfact-panel { background: rgba(255,255,255,.04); }
-.youfact-panel__head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
-.youfact-panel__score { font-size: 26px; font-weight: 500; color: var(--tone, #909090); }
-.youfact-panel__score[data-tone="good"] { --tone:#1d9e75; }
-.youfact-panel__score[data-tone="mixed"] { --tone:#ba7517; }
-.youfact-panel__score[data-tone="poor"] { --tone:#d85a30; }
+/* Centred, not baseline: the head now leads with a gauge, and an SVG has no
+   baseline worth aligning text to. */
+.youfact-panel__head { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
 .youfact-panel__summary { color: #8f8f8f; flex: 1; }
 .youfact-panel__close { border: none; background: none; color: #8f8f8f; cursor: pointer; font-size: 14px; }
 .youfact-panel__counts { color: #8f8f8f; font-size: 12px; margin-bottom: 14px; }

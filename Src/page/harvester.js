@@ -133,13 +133,21 @@ function scanInitialData() {
 
 let rescanTimer = null;
 let lastCanarySignature = '';
+let publishedClientConfig = false;
 
 function publish() {
   const clientConfig = readClientConfig();
   const fromDom = scanDocument();
   const icons = [...new Set([...fromDom.icons, ...scanInitialData()])];
 
-  if (fromDom.items.length) {
+  // Publishing used to be conditional on finding a channel-bearing item, which
+  // quietly coupled two unrelated things to the feed scan: the client config
+  // the isolated world needs, and the mount pass that puts the fact-check pill
+  // on the page. A watch page that yields no items — the sidebar not painted
+  // yet, a layout we do not resolve — got neither. The config is published
+  // once on its own account so neither depends on the scan finding anything.
+  if (fromDom.items.length || (clientConfig && !publishedClientConfig)) {
+    if (clientConfig) publishedClientConfig = true;
     postFromPage(MESSAGE.HARVEST, { items: fromDom.items, clientConfig });
   }
 

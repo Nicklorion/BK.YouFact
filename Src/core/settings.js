@@ -28,16 +28,35 @@ export const PROVIDERS = Object.freeze({
   }
 });
 
+/**
+ * How hard to look before calling a claim unverified.
+ *
+ * Kept separate from `effort`, which buys reasoning depth. They are different
+ * questions: a claim can need one lookup and careful judgement, or ten lookups
+ * and none. This is the budget of web searches spent on each individual claim,
+ * so total searches is roughly this times the claim count — it is the second
+ * cost lever after `maxClaims`, and the one that decides whether a verdict can
+ * cite anything at all.
+ */
+export const RESEARCH_DEPTHS = Object.freeze({
+  quick: { label: 'Quick — 2 searches per claim', searchesPerClaim: 2 },
+  standard: { label: 'Standard — 4 searches per claim', searchesPerClaim: 4 },
+  deep: { label: 'Deep — 8 searches per claim', searchesPerClaim: 8 },
+  exhaustive: { label: 'Exhaustive — 15 searches per claim', searchesPerClaim: 15 }
+});
+
 export const DEFAULTS = Object.freeze({
   provider: 'anthropic',
   apiKey: '',
   model: 'claude-opus-5',
   /** Maps to reasoning budget and to how hard the research stage digs. */
   effort: 'medium',
-  /** off | auto | on — auto enables thinking only for the judging stage. */
+  /** off | auto | on — auto asks for thinking only on the research stage. */
   thinking: 'auto',
   /** Ceiling on claims extracted per video; the main cost lever. */
   maxClaims: 12,
+  /** How many web searches each claim gets before it is called unverified. */
+  researchDepth: 'standard',
   /** Skip videos shorter than this — Shorts rarely carry checkable claims. */
   minDurationSeconds: 60,
   /** Never call the model without the user asking. */
@@ -66,6 +85,9 @@ export function validate(settings) {
   if (!EFFORTS.includes(settings.effort)) problems.push({ field: 'effort', message: 'Invalid effort' });
   if (!THINKING_MODES.includes(settings.thinking)) {
     problems.push({ field: 'thinking', message: 'Invalid thinking mode' });
+  }
+  if (!RESEARCH_DEPTHS[settings.researchDepth]) {
+    problems.push({ field: 'researchDepth', message: 'Invalid research depth' });
   }
   if (!Number.isInteger(settings.maxClaims) || settings.maxClaims < 1 || settings.maxClaims > 50) {
     problems.push({ field: 'maxClaims', message: 'Claims per video must be between 1 and 50' });
