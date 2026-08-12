@@ -6,6 +6,7 @@ import {
   saveSettings,
   validate
 } from '../core/settings.js';
+import { estimateCheckCost, formatCost } from '../core/cost.js';
 
 const $ = (id) => document.getElementById(id);
 const status = $('status');
@@ -63,21 +64,56 @@ function readForm() {
 }
 
 /**
- * Searches are the part of a check that scales with both levers at once, so
- * the ceiling is worth stating in numbers rather than leaving to be discovered
- * on a bill.
+ * State the ceiling in money.
+ *
+ * This hint used to give a search count and leave the reader to infer the cost
+ * from the $0.01-per-search fee. That understated the real figure by more than
+ * ten times, because the fees are not the expense — the tokens each search
+ * drags into context are, and they are re-billed on every subsequent search in
+ * the same turn. See Docs/cost.md.
  */
-function renderDepthHint() {
+function renderDepthCost() {
   const depth = RESEARCH_DEPTHS[$('researchDepth').value];
   const claims = Number($('maxClaims').value) || 0;
+  const model = $('model').value;
+
   if (!depth || !claims) {
     $('researchDepthHint').textContent = '';
     return;
   }
+
+  const ceiling = formatCost(
+    estimateCheckCost({ claims, searchesPerClaim: depth.searchesPerClaim, model })
+  );
+
   $('researchDepthHint').textContent =
-    `Each claim is researched on its own. Up to ${depth.searchesPerClaim * claims} ` +
-    `web searches per video at ${claims} claims — a claim gets a verdict it can cite ` +
-    'only if the search finds something, so this is what decides how many come back unverified.';
+    `Up to about ${ceiling} per video at ${claims} claims — an estimated ceiling, ` +
+    'not a quote. Search results are re-billed on every later search in the same ' +
+    'request, so cost climbs far faster than the search count: doubling the budget ' +
+    'roughly triples the bill. ' +
+    (depth.researchAsides
+      ? 'Asides are researched at this depth.'
+      : 'Asides are listed but not researched, which brings the real figure below this.');
+}
+
+/** Labels carry the price, because the search count on its own hid it. */
+function renderDepthOptions(selected = $('researchDepth').value) {
+  const claims = Number($('maxClaims').value) || 0;
+  const model = $('model').value;
+
+  fillSelect(
+    $('researchDepth'),
+    Object.entries(RESEARCH_DEPTHS).map(([value, depth]) => {
+      const searches = `${depth.searchesPerClaim} ${depth.searchesPerClaim === 1 ? 'search' : 'searches'}/claim`;
+      const price = claims
+        ? ` · up to ${formatCost(estimateCheckCost({ claims, searchesPerClaim: depth.searchesPerClaim, model }))}`
+        : '';
+      return { value, label: `${depth.label} — ${searches}${price}` };
+    }),
+    selected
+  );
+
+  renderDepthCost();
 }
 
 function writeForm(settings) {
@@ -92,16 +128,10 @@ function writeForm(settings) {
   $('effort').value = settings.effort;
   $('thinking').value = settings.thinking;
   $('maxClaims').value = settings.maxClaims;
-
-  fillSelect(
-    $('researchDepth'),
-    Object.entries(RESEARCH_DEPTHS).map(([value, depth]) => ({ value, label: depth.label })),
-    settings.researchDepth
-  );
+  renderDepthOptions(settings.researchDepth);
 
   $('minDurationSeconds').value = settings.minDurationSeconds;
   $('autoCheck').checked = settings.autoCheck;
-  renderDepthHint();
 }
 
 /**
@@ -134,11 +164,15 @@ async function testConnection(settings) {
 $('provider').addEventListener('change', () => {
   const providerId = $('provider').value;
   renderProvider(providerId, PROVIDERS[providerId]?.models[0]?.id);
+  // Switching provider switches the model, and the estimate is priced per model.
+  renderDepthOptions();
 });
 
-// The ceiling is the product of both, so either one moving restates it.
-$('researchDepth').addEventListener('change', renderDepthHint);
-$('maxClaims').addEventListener('input', renderDepthHint);
+// The estimate is a function of depth, claim count and the model's rate, so
+// any of the three moving restates every label.
+$('researchDepth').addEventListener('change', renderDepthCost);
+$('maxClaims').addEventListener('input', () => renderDepthOptions());
+$('model').addEventListener('change', () => renderDepthOptions());
 
 $('reveal').addEventListener('click', () => {
   const field = $('apiKey');

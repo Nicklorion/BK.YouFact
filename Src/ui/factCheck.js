@@ -330,7 +330,10 @@ function claimRow(claim) {
   if (!claim.sources?.length) {
     const errors = claim.searchErrors?.length ? ` — search error: ${claim.searchErrors.join(', ')}` : '';
     let note;
-    if (claim.searches == null) {
+    if (claim.notResearched) {
+      // A deliberate skip is not a failure, and must not read like one.
+      note = 'Not researched — an aside; raise the research depth to include these';
+    } else if (claim.searches == null) {
       note = 'No sources settled this claim';
     } else if (claim.searches > 0) {
       note = `No source settled this claim — ${claim.searches} ${claim.searches === 1 ? 'search' : 'searches'} run${errors}`;

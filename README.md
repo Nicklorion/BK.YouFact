@@ -151,12 +151,20 @@ Two settings decide what a check costs, and they multiply:
 
 - **Claims per video** — how many claims are extracted at all.
 - **How hard to verify each claim** — web searches per claim, from Quick (2) to
-  Exhaustive (15). Separate from effort, which buys reasoning rather than
+  Exhaustive (10). Separate from effort, which buys reasoning rather than
   lookups. A claim only earns a citable verdict if its search finds something,
   so this is what decides how many come back unverified.
 
-Twelve claims at Standard is up to 48 searches; the options page states the
-ceiling for whatever you pick.
+Depth is not linear in cost. Search results are re-billed on every later search
+in the same request, so the bill goes as roughly the square of the budget —
+doubling it closer to triples the cost. Both the depth labels and the hint
+state an estimated ceiling in money for the model and claim count you have
+selected; twelve claims at Standard on Sonnet 5 is about $1.70 in practice.
+`Docs/cost.md` has the arithmetic.
+
+Below Deep, claims the model marked as asides are extracted and listed but not
+researched — an aside costs the same to check as the thesis and moves the score
+least.
 
 Checks never run automatically unless you turn that on. Every check costs money,
 so the default is that YouFact does nothing until asked.

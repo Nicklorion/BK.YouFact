@@ -12,7 +12,7 @@
  * into schema.
  */
 
-import { RESEARCH_DEPTHS } from '../core/settings.js';
+import { researchDepth } from '../core/settings.js';
 
 const ENDPOINT = 'https://api.anthropic.com/v1/messages';
 const API_VERSION = '2023-06-01';
@@ -59,9 +59,16 @@ const EFFORT = {
   high: { effort: 'high', legacyBudget: 10000, maxTokens: 16000 }
 };
 
-/** Falls back rather than throwing: a bad depth should cost coverage, not the check. */
-const searchesPerClaim = (settings) =>
-  (RESEARCH_DEPTHS[settings.researchDepth] ?? RESEARCH_DEPTHS.standard).searchesPerClaim;
+/**
+ * A claim is worth looking up when it carries the argument.
+ *
+ * Scoring weights core 3, supporting 2, aside 1, but researching an aside
+ * costs exactly what researching the thesis costs — and research is ~80% of
+ * the bill. Below Deep, asides are still extracted and listed; they just are
+ * not searched for. An unknown centrality is researched, because guessing a
+ * claim is unimportant is the expensive mistake to get wrong.
+ */
+const worthResearching = (claim, depth) => depth.researchAsides || claim.centrality !== 'aside';
 
 /**
  * Claims researched at once.
@@ -409,10 +416,11 @@ export async function extractClaims(settings, { passages, metadata, maxClaims })
  * @param {{onProgress?: (done: number, total: number) => void}} options
  */
 export async function researchClaims(settings, { claims, metadata, onProgress = () => {} }) {
+  const depth = researchDepth(settings);
   const searchTool = {
     type: shapeFor(settings.model).search,
     name: 'web_search',
-    max_uses: searchesPerClaim(settings)
+    max_uses: depth.searchesPerClaim
   };
 
   const about =
@@ -422,6 +430,21 @@ export async function researchClaims(settings, { claims, metadata, onProgress = 
   let done = 0;
 
   const findings = await mapLimited(claims, RESEARCH_CONCURRENCY, async (claim, index) => {
+    if (!worthResearching(claim, depth)) {
+      done += 1;
+      onProgress(done, claims.length);
+      return {
+        index,
+        claim: claim.claim,
+        notes: 'Not researched: an aside, and this research depth covers core and supporting claims only.',
+        sources: [],
+        searches: 0,
+        searchErrors: [],
+        skipped: true,
+        usage: null
+      };
+    }
+
     try {
       const message = await callMessages(settings, {
         system: RESEARCH_SYSTEM,
@@ -483,6 +506,15 @@ export async function researchClaims(settings, { claims, metadata, onProgress = 
 
 /** One claim, its research and the urls that verdict may cite. */
 function dossier(finding) {
+  // Say plainly that nothing was looked up, so the judge marks it unverified
+  // rather than reaching for its own knowledge to fill the gap.
+  if (finding.skipped) {
+    return (
+      `### Claim ${finding.index}\n${finding.claim}\n\n` +
+      `${finding.notes}\nNo evidence was gathered, so this claim is unverified.`
+    );
+  }
+
   const sources = finding.sources.length
     ? finding.sources.map((source) => `  - ${source.url} — ${source.title}`).join('\n')
     : '  (none)';

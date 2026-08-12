@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+### Checks cost about half what they did
+
+An observed check billed $3.88. `Docs/cost.md` records where it went: research
+is ~80% of the bill, and within research the dominant term is not the $0.01
+search fee but the tokens each search drags into context. The server-side
+search loop bills the whole conversation on every iteration, so the results of
+search 1 are paid for again on every search after it — **cost is quadratic in
+the search budget, not linear**.
+
+- **Standard depth is 3 searches per claim, not 4** — which removes ~40% of
+  research tokens, not 25%. Deep and Exhaustive came down from 8 and 15 to 6
+  and 10; the old top of the ladder priced one video near $40.
+- **Asides are no longer researched below Deep.** Scoring already weights core
+  3 / supporting 2 / aside 1, but researching an aside cost exactly what
+  researching the thesis cost. They are still extracted and listed, marked
+  "Not researched", and the judge is told nothing was gathered so it marks them
+  unverified rather than answering from its own knowledge. A claim with no
+  centrality is still researched.
+- Together these estimate the same check at **$1.70**, a 56% reduction.
+
+### The depth hint was misleading
+
+It stated the ceiling as a search count — "up to 180 web searches per video" at
+the old Exhaustive — which reads as $1.80 of fees against a real figure near
+$40. Depth labels and the hint now both carry an estimated cost ceiling, priced
+for the selected model and claim count, via a new `Src/core/cost.js`. Choosing
+Opus restates every label.
+
 ## 1.0.0-rc.1
 
 First release candidate. The fact-check pipeline runs end to end.

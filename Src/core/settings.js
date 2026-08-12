@@ -33,17 +33,28 @@ export const PROVIDERS = Object.freeze({
  *
  * Kept separate from `effort`, which buys reasoning depth. They are different
  * questions: a claim can need one lookup and careful judgement, or ten lookups
- * and none. This is the budget of web searches spent on each individual claim,
- * so total searches is roughly this times the claim count — it is the second
- * cost lever after `maxClaims`, and the one that decides whether a verdict can
- * cite anything at all.
+ * and none.
+ *
+ * This is by far the most expensive setting in the extension, and not
+ * linearly. The server-side search loop bills the whole conversation on every
+ * iteration, so results from the first search are paid for again on every
+ * search after it — cost goes as roughly s²/2, not s. Doubling the budget
+ * closer to triples the bill. `Docs/cost.md` has the arithmetic.
+ *
+ * `researchAsides` is the other half of the lever. Claims carry a centrality,
+ * and scoring already weights core 3 / supporting 2 / aside 1. Researching an
+ * aside costs exactly as much as researching the thesis and moves the score
+ * least, so below Deep they are extracted and listed but not looked up.
  */
 export const RESEARCH_DEPTHS = Object.freeze({
-  quick: { label: 'Quick — 2 searches per claim', searchesPerClaim: 2 },
-  standard: { label: 'Standard — 4 searches per claim', searchesPerClaim: 4 },
-  deep: { label: 'Deep — 8 searches per claim', searchesPerClaim: 8 },
-  exhaustive: { label: 'Exhaustive — 15 searches per claim', searchesPerClaim: 15 }
+  quick: { label: 'Quick', searchesPerClaim: 2, researchAsides: false },
+  standard: { label: 'Standard', searchesPerClaim: 3, researchAsides: false },
+  deep: { label: 'Deep', searchesPerClaim: 6, researchAsides: true },
+  exhaustive: { label: 'Exhaustive', searchesPerClaim: 10, researchAsides: true }
 });
+
+export const researchDepth = (settings) =>
+  RESEARCH_DEPTHS[settings?.researchDepth] ?? RESEARCH_DEPTHS.standard;
 
 export const DEFAULTS = Object.freeze({
   provider: 'anthropic',

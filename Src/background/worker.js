@@ -151,9 +151,11 @@ export async function runCheck(
         reasoning: verdict?.reasoning ?? 'The judging stage returned no verdict for this claim.',
         sources: cited,
         // What the research actually did, so "no sources" can distinguish
-        // "searched and found nothing" from "never looked".
+        // "searched and found nothing" from "never looked" from "deliberately
+        // skipped as an aside".
         searches: finding?.searches ?? 0,
         searchErrors: finding?.searchErrors ?? [],
+        notResearched: finding?.skipped === true,
         // Sources the search surfaced that the verdict did not lean on. Worth
         // keeping: an unverified claim with four consulted pages is a
         // different thing from one with none.

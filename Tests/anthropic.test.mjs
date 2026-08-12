@@ -255,14 +255,102 @@ test('researches every claim, not whichever ones fit a shared budget', async () 
 test('gives each claim its own search budget, set by research depth', async () => {
   for (const [depth, expected] of [
     ['quick', 2],
-    ['standard', 4],
-    ['deep', 8],
-    ['exhaustive', 15]
+    ['standard', 3],
+    ['deep', 6],
+    ['exhaustive', 10]
   ]) {
     const calls = captureFetch(RESEARCH_REPLY);
     await researchClaims(settings({ researchDepth: depth }), { claims, metadata: null });
     assert.equal(calls[0].body.tools[0].max_uses, expected, `${depth} should allow ${expected}`);
   }
+});
+
+test('does not spend searches on asides below Deep', async () => {
+  // Research is ~80% of the bill and an aside costs what the thesis costs,
+  // while scoring weights it a third as much.
+  const mixed = [
+    { claim: 'Core claim.', quote: 'q', centrality: 'core' },
+    { claim: 'Supporting claim.', quote: 'q', centrality: 'supporting' },
+    { claim: 'An aside.', quote: 'q', centrality: 'aside' }
+  ];
+
+  const calls = captureFetch(RESEARCH_REPLY);
+  const result = await researchClaims(settings({ researchDepth: 'standard' }), {
+    claims: mixed,
+    metadata: null
+  });
+
+  assert.equal(calls.length, 2, 'the aside must not reach the API');
+  assert.equal(result.findings.length, 3, 'but it still gets a finding, in order');
+  assert.equal(result.findings[2].skipped, true);
+  assert.equal(result.findings[2].searches, 0);
+  assert.match(result.findings[2].notes, /Not researched/);
+});
+
+test('researches asides once the depth is paid for', async () => {
+  const mixed = [
+    { claim: 'Core claim.', quote: 'q', centrality: 'core' },
+    { claim: 'An aside.', quote: 'q', centrality: 'aside' }
+  ];
+
+  const calls = captureFetch(RESEARCH_REPLY);
+  await researchClaims(settings({ researchDepth: 'deep' }), { claims: mixed, metadata: null });
+
+  assert.equal(calls.length, 2);
+});
+
+test('researches a claim whose centrality is missing', async () => {
+  // Guessing that a claim is unimportant is the expensive mistake to get wrong.
+  const calls = captureFetch(RESEARCH_REPLY);
+  await researchClaims(settings({ researchDepth: 'quick' }), {
+    claims: [{ claim: 'Unlabelled.', quote: 'q' }],
+    metadata: null
+  });
+
+  assert.equal(calls.length, 1);
+});
+
+test('skipped claims still report progress, so the count reaches its total', async () => {
+  captureFetch(RESEARCH_REPLY);
+  const seen = [];
+  await researchClaims(settings({ researchDepth: 'standard' }), {
+    claims: [
+      { claim: 'a', quote: 'q', centrality: 'aside' },
+      { claim: 'b', quote: 'q', centrality: 'core' }
+    ],
+    metadata: null,
+    onProgress: (done, total) => seen.push(`${done}/${total}`)
+  });
+
+  assert.deepEqual(seen.sort(), ['1/2', '2/2']);
+});
+
+test('tells the judge a skipped claim was never looked up', async () => {
+  // Otherwise it fills the gap from its own knowledge, which is the one thing
+  // the judging stage must not do.
+  const calls = captureFetch({
+    content: [{ type: 'tool_use', name: 'record_verdicts', input: { verdicts: [], framing: 0, sourcing: 0 } }],
+    usage: {}
+  });
+
+  await judgeClaims(settings(), {
+    claims: [{ claim: 'An aside.' }],
+    findings: [
+      {
+        index: 0,
+        claim: 'An aside.',
+        notes: 'Not researched: an aside, and this research depth covers core and supporting claims only.',
+        sources: [],
+        searches: 0,
+        searchErrors: [],
+        skipped: true
+      }
+    ]
+  });
+
+  const prompt = calls[0].body.messages[0].content;
+  assert.match(prompt, /Not researched/);
+  assert.match(prompt, /unverified/);
 });
 
 test('research depth is independent of effort', async () => {
@@ -274,8 +362,8 @@ test('research depth is independent of effort', async () => {
   const high = captureFetch(RESEARCH_REPLY);
   await researchClaims(settings({ effort: 'high', researchDepth: 'deep' }), { claims, metadata: null });
 
-  assert.equal(low[0].body.tools[0].max_uses, 8);
-  assert.equal(high[0].body.tools[0].max_uses, 8);
+  assert.equal(low[0].body.tools[0].max_uses, 6);
+  assert.equal(high[0].body.tools[0].max_uses, 6);
   assert.equal(low[0].body.output_config.effort, 'low');
   assert.equal(high[0].body.output_config.effort, 'high');
 });
@@ -284,7 +372,7 @@ test('an unknown depth costs coverage, not the check', async () => {
   const calls = captureFetch(RESEARCH_REPLY);
   await researchClaims(settings({ researchDepth: 'nonsense' }), { claims, metadata: null });
 
-  assert.equal(calls[0].body.tools[0].max_uses, 4, 'falls back to standard');
+  assert.equal(calls[0].body.tools[0].max_uses, 3, 'falls back to standard');
 });
 
 test('reports research progress so a long stage is not a silence', async () => {
